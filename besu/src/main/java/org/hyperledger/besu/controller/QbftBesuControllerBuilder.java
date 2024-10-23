@@ -212,7 +212,7 @@ public class QbftBesuControllerBuilder extends BftBesuControllerBuilder {
     peers = new ValidatorPeers(validatorProvider, Istanbul100SubProtocol.NAME);
 
     final UniqueMessageMulticaster uniqueMessageMulticaster =
-        new UniqueMessageMulticaster(peers, qbftConfig.getGossipedHistoryLimit());
+        new UniqueMessageMulticaster(peers,0/* qbftConfig.getGossipedHistoryLimit()*/);
 
     final QbftGossip gossiper = new QbftGossip(uniqueMessageMulticaster, bftExtraDataCodec().get());
 
@@ -245,7 +245,7 @@ public class QbftBesuControllerBuilder extends BftBesuControllerBuilder {
             qbftConfig.getFutureMessagesLimit(),
             blockchain.getChainHeadBlockNumber());
     final MessageTracker duplicateMessageTracker =
-        new MessageTracker(qbftConfig.getDuplicateMessageLimit());
+        new MessageTracker(0/*qbftConfig.getDuplicateMessageLimit()*/);
 
     final MessageFactory messageFactory = new MessageFactory(nodeKey);
 
