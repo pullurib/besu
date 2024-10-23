@@ -34,6 +34,7 @@ import org.hyperledger.besu.plugin.services.securitymodule.SecurityModuleExcepti
 
 import java.time.Clock;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -227,23 +228,33 @@ public class QbftBlockHeightManager implements BaseQbftBlockHeightManager {
       return;
     }
 
+    roundChangeHelper(qbftRound, qbftRound.getRoundIdentifier().getRoundNumber() + 1);
+  }
+
+  public void roundChangeHelper(final QbftRound qbftRound, final int roundNumber) {
+
     LOG.debug(
-        "Round has expired, creating PreparedCertificate and notifying peers. round={}",
-        qbftRound.getRoundIdentifier());
+            "Round has to change, creating PreparedCertificate and notifying peers. round={}",
+            qbftRound.getRoundIdentifier());
     final Optional<PreparedCertificate> preparedCertificate =
-        qbftRound.constructPreparedCertificate();
+            qbftRound.constructPreparedCertificate();
 
     if (preparedCertificate.isPresent()) {
       latestPreparedCertificate = preparedCertificate;
     }
 
-    startNewRound(qbftRound.getRoundIdentifier().getRoundNumber() + 1);
-    qbftRound = currentRound.get();
+    startNewRound(roundNumber);
+    if (currentRound.isEmpty()) {
+      LOG.info(
+              "Failed to start round ");
+      return;
+    }
+    QbftRound qbftRoundNew = currentRound.get();
 
     try {
       final RoundChange localRoundChange =
-          messageFactory.createRoundChange(
-              qbftRound.getRoundIdentifier(), latestPreparedCertificate);
+              messageFactory.createRoundChange(
+                      qbftRoundNew.getRoundIdentifier(), latestPreparedCertificate);
 
       // Its possible the locally created RoundChange triggers the transmission of a NewRound
       // message - so it must be handled accordingly.
@@ -252,7 +263,8 @@ public class QbftBlockHeightManager implements BaseQbftBlockHeightManager {
       LOG.warn("Failed to create signed RoundChange message.", e);
     }
 
-    transmitter.multicastRoundChange(qbftRound.getRoundIdentifier(), latestPreparedCertificate);
+    transmitter.multicastRoundChange(qbftRoundNew.getRoundIdentifier(), latestPreparedCertificate, finalState.getRoundTimer());
+
   }
 
   @Override
@@ -314,7 +326,7 @@ public class QbftBlockHeightManager implements BaseQbftBlockHeightManager {
   public void handleRoundChangePayload(final RoundChange message) {
     final ConsensusRoundIdentifier targetRound = message.getRoundIdentifier();
 
-    LOG.debug(
+    LOG.info(
         "Round change from {}: block {}, round {}",
         message.getAuthor(),
         message.getRoundIdentifier().getSequenceNumber(),
@@ -326,31 +338,41 @@ public class QbftBlockHeightManager implements BaseQbftBlockHeightManager {
     final MessageAge messageAge =
         determineAgeOfPayload(message.getRoundIdentifier().getRoundNumber());
     if (messageAge == MessageAge.PRIOR_ROUND) {
-      LOG.debug("Received RoundChange Payload for a prior round. targetRound={}", targetRound);
+      LOG.info("Received RoundChange Payload for a prior round. targetRound={}", targetRound);
       return;
     }
 
     final Optional<Collection<RoundChange>> result =
         roundChangeManager.appendRoundChangeMessage(message);
 
-    if (result.isPresent()) {
-      LOG.debug(
-          "Received sufficient RoundChange messages to change round to targetRound={}",
-          targetRound);
-      if (messageAge == MessageAge.FUTURE_ROUND) {
-        startNewRound(targetRound.getRoundNumber());
-      }
+    // If this node is proposer for the current round, check if quorum is achieved for RC messages aiming this round
+    if (finalState.isLocalNodeProposerForRound(targetRound) && result.isPresent()) {
 
       final RoundChangeArtifacts roundChangeMetadata = RoundChangeArtifacts.create(result.get());
 
-      if (finalState.isLocalNodeProposerForRound(targetRound)) {
-        if (currentRound.isEmpty()) {
-          startNewRound(0);
-        }
-        currentRound
-            .get()
-            .startRoundWith(roundChangeMetadata, TimeUnit.MILLISECONDS.toSeconds(clock.millis()));
+      // TODO: check if this case is possible given RC messages aren't sent in round 0?
+      if (currentRound.isEmpty()) {
+        startNewRound(0);
       }
+      currentRound
+          .get()
+          .startRoundWith(roundChangeMetadata, TimeUnit.MILLISECONDS.toSeconds(clock.millis()));
+
+    }
+
+    // check if f+1 RC messages for future rounds are received
+    if (currentRound.isEmpty()) {
+      LOG.info(
+              "current round is empty");
+      return;
+    }
+    QbftRound qbftRound = currentRound.get();
+    Optional<Integer> nextHigherRound = roundChangeManager.futureRCQuorumReceived(qbftRound.getRoundIdentifier());
+    if (nextHigherRound.isPresent()) {
+      LOG.info(
+              "Received sufficient RoundChange messages to change round to targetRound={}",
+              nextHigherRound.get());
+      roundChangeHelper(qbftRound, nextHigherRound.get());
     }
   }
 

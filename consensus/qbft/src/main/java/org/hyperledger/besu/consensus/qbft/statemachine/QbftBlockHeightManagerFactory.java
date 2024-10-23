@@ -85,6 +85,7 @@ public class QbftBlockHeightManagerFactory {
         finalState,
         new RoundChangeManager(
             BftHelpers.calculateRequiredValidatorQuorum(finalState.getValidators().size()),
+            BftHelpers.calculateRequiredFutureRCQuorum(finalState.getValidators().size()),
             messageValidatorFactory.createRoundChangeMessageValidator(
                 parentHeader.getNumber() + 1L, parentHeader),
             finalState.getLocalAddress()),
