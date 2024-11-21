@@ -22,11 +22,15 @@ import java.util.Collection;
 import java.util.Collections;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** The Unique message multicaster. */
 public class UniqueMessageMulticaster implements ValidatorMulticaster {
   private final ValidatorMulticaster multicaster;
   private final MessageTracker gossipedMessageTracker;
+
+  private static final Logger LOG = LoggerFactory.getLogger(UniqueMessageMulticaster.class);
 
   /**
    * Constructor that attaches gossip logic to a set of multicaster
@@ -61,6 +65,7 @@ public class UniqueMessageMulticaster implements ValidatorMulticaster {
   @Override
   public void send(final MessageData message, final Collection<Address> denylist) {
     if (gossipedMessageTracker.hasSeenMessage(message)) {
+      LOG.info("Not sending the message out as it's seen");
       return;
     }
     multicaster.send(message, denylist);
